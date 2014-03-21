@@ -2,14 +2,17 @@ package webdav
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"log"
+	"math/rand"
 	"mime"
 	"net/http"
 	"net/url"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func Handler(root FileSystem) http.Handler {
@@ -28,10 +31,20 @@ type Server struct {
 
 	// access to a collection of named files
 	Fs FileSystem
+
+	tokens_to_lock map[string]string
+
+	uris_to_token map[string]string
+}
+
+func generateToken() string {
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return fmt.Sprintf("%s-%s-00105A989226:%.03f",
+		r.Int31(), r.Int31(), time.Now().UnixNano())
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	log.Println("DAV:", r.RemoteAddr, r.Method, r.URL)
+	//log.Println("DAV:", r.RemoteAddr, r.Method, r.URL)
 
 	switch r.Method {
 	case "OPTIONS":
@@ -439,7 +452,8 @@ func (s *Server) doMkcol(w http.ResponseWriter, r *http.Request) {
 	path := s.url2path(r.URL)
 	if s.pathExists(path) {
 		w.Header().Set("Allow", s.methodsAllowed(s.url2path(r.URL)))
-		w.WriteHeader(StatusMethodNotAllowed)
+		//w.WriteHeader(StatusMethodNotAllowed)
+		w.WriteHeader(StatusCreated)
 		return
 	}
 
