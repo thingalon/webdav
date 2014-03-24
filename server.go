@@ -32,7 +32,7 @@ type Server struct {
 	// access to a collection of named files
 	Fs FileSystem
 
-	tokens_to_lock map[string]string
+	tokens_to_lock map[string]*Lock
 
 	uris_to_token map[string]string
 }
@@ -181,6 +181,36 @@ func (s *Server) isLockedRequest(r *http.Request) bool {
 func (s *Server) isLocked(path, ifHeader string) bool {
 	// TODO
 	return false
+}
+
+func (s *Server) _l_isLocked(uri string) bool {
+	_, ok := s.uris_to_token[uri]
+	return ok
+}
+
+func (s *Server) hasLock(token string) bool {
+	_, ok := s.tokens_to_lock[token]
+	return ok
+}
+
+func (s *Server) getToken(uri string) string {
+	return s.uris_to_token[uri]
+}
+
+func (s *Server) getLock(token string) *Lock {
+	return s.tokens_to_lock[token]
+}
+
+func (s *Server) delLock(token string) {
+	if lock, ok := s.tokens_to_lock[token]; ok {
+		delete(s.uris_to_token, lock.uri)
+		delete(s.tokens_to_lock, token)
+	}
+}
+
+func (s *Server) setLock(lock *Lock) {
+	s.tokens_to_lock[lock.token] = lock
+	s.uris_to_token[lock.uri] = lock.token
 }
 
 func (s *Server) lockResource(path string) {
@@ -876,6 +906,21 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(StatusNotImplemented)
 }
 
+// takes a string like '<opaquelocktoken:afsdfadfadf> and returns the token
+// part.
+func tokenFinder(token string) string {
+	if token == "" {
+		return ""
+	}
+	if token[0] == '[' {
+		return ""
+	}
+	if token[0] == '<' {
+		token = token[1 : len(token)-1]
+	}
+	return token[strings.Index(token, ":")+1:]
+}
+
 func (s *Server) doUnlock(w http.ResponseWriter, r *http.Request) {
 	if s.ReadOnly {
 		w.WriteHeader(StatusForbidden)
@@ -889,6 +934,30 @@ func (s *Server) doUnlock(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: unlock
 	w.WriteHeader(StatusNotImplemented)
+	return
+	/*
+		        dc = self.IFACE_CLASS
+
+		        if self._config.DAV.getboolean('verbose') is True:
+		            log.info('UNLOCKing resource %s' % self.headers)
+
+		        uri = urlparse.urljoin(self.get_baseuri(dc), self.path)
+		        uri = urllib.unquote(uri)
+
+		        # check lock token - must contain a dash
+
+		        if !strings.Contains(r.Header.Get("Lock-Token"), "-") {
+					w.WriteHeader(400)
+		        	return
+		        }
+
+		        token := tokenFinder(r.Header.Get("Lock-Token"))
+		        if s.isLocked(path, ifHeader)._l_isLocked(uri) {
+		            s._l_delLock(token)
+		        }
+
+		        w.WriteHeader(204)
+		        //self.send_body(None, '204', 'Ok', 'Ok')*/
 }
 
 func (s *Server) doOptions(w http.ResponseWriter, r *http.Request) {
