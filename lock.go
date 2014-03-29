@@ -1,8 +1,8 @@
 package webdav
 
 import (
-	"time"
 	"fmt"
+	"time"
 )
 
 type Lock struct {
@@ -39,8 +39,8 @@ func (lock *Lock) IsValid() bool {
 	return lock.timeout > time.Now().Sub(lock.Modified)
 }
 
-func (lock *Lock) GetTimeoutString() string{
-	return fmt.Sprintf("Second-%d", lock.timeout / time.Second)
+func (lock *Lock) GetTimeoutString() string {
+	return fmt.Sprintf("Second-%d", lock.timeout/time.Second)
 }
 
 func (lock *Lock) setTimeout(timeout time.Duration) {
@@ -49,10 +49,10 @@ func (lock *Lock) setTimeout(timeout time.Duration) {
 }
 
 func (lock *Lock) asXML(namespace string, discover bool) string {
-    //owner_str = lock.owner
-    //owner_str = "".join([node.toxml() for node in self.owner[0].childNodes])
+	//owner_str = lock.owner
+	//owner_str = "".join([node.toxml() for node in self.owner[0].childNodes])
 
-    base := fmt.Sprintf(`<%[1]s:activelock>\n
+	base := fmt.Sprintf(`<%[1]s:activelock>\n
              <%[1]s:locktype><%[1]s:%[2]s/></%[1]s:locktype>\n'
              '  <%[1]s:lockscope><%[1]s:%[3]s/></%[1]s:lockscope>\n'
              '  <%[1]s:depth>%[4]s</%[1]s:depth>\n'
@@ -63,22 +63,22 @@ func (lock *Lock) asXML(namespace string, discover bool) string {
              '  </%[1]s:locktoken>\n'
              ' </%[1]s:activelock>\n'
              `, namespace,
-               lock.typ,
-               lock.scope,
-               lock.depth,
-               lock.owner,
-               lock.GetTimeoutString(),
-               lock.token,
-               )
+		lock.typ,
+		lock.scope,
+		lock.depth,
+		lock.owner,
+		lock.GetTimeoutString(),
+		lock.token,
+	)
 
-        if discover {
-            return base
-        }
+	if discover {
+		return base
+	}
 
-        return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8" ?>
+	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8" ?>
 <d:prop xmlns:d="DAV:">
  <d:lockdiscovery>
   %s
  </d:lockdiscovery>
 </d:prop>`, base)
-    }
+}

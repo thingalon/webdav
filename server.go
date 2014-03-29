@@ -4,16 +4,50 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"log"
 	"math/rand"
 	"mime"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gogits/gogs/modules/log"
 )
+
+func newLogger(execDir string) {
+	level := "0"
+	logPath := execDir + "/log/webdav.log"
+	os.MkdirAll(path.Dir(logPath), os.ModePerm)
+	log.NewLogger(10000, "file", fmt.Sprintf(`{"level":%s,"filename":"%s"}`, level, logPath))
+	log.Trace("start logging webdav...")
+}
+
+func ExecDir() (string, error) {
+	file, err := exec.LookPath(os.Args[0])
+	if err != nil {
+		return "", err
+	}
+	p, err := filepath.Abs(file)
+	if err != nil {
+		return "", err
+	}
+	return path.Dir(strings.Replace(p, "\\", "/", -1)), nil
+}
+
+func init() {
+	exePath, err := ExecDir()
+	if err != nil {
+		panic(err)
+	}
+
+	newLogger(exePath)
+}
 
 func Handler(root FileSystem) http.Handler {
 	return &Server{Fs: root}
@@ -34,13 +68,23 @@ type Server struct {
 
 	tokens_to_lock map[string]*Lock
 
-	uris_to_token map[string]string
+	path_to_token map[string]string
 }
 
 func generateToken() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	return fmt.Sprintf("%s-%s-00105A989226:%.03f",
 		r.Int31(), r.Int31(), time.Now().UnixNano())
+}
+
+func NewServer(dir, prefix string, listDir bool) *Server {
+	return &Server{
+		Fs:             Dir(dir),
+		TrimPrefix:     prefix,
+		Listings:       listDir,
+		tokens_to_lock: make(map[string]*Lock),
+		path_to_token:  make(map[string]string),
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -78,7 +122,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.doUnlock(w, r)
 
 	default:
-		log.Println("DAV:", "unknown method", r.Method)
+		log.Error("DAV:", "unknown method", r.Method)
 		w.WriteHeader(StatusBadRequest)
 	}
 }
@@ -174,18 +218,73 @@ func (s *Server) directoryContents(path string) []string {
 func (s *Server) isLockedRequest(r *http.Request) bool {
 	return s.isLocked(
 		s.url2path(r.URL),
-		r.Header.Get("If")+r.Header.Get("Lock-Token"))
+		r.Header.Get("If") /*+r.Header.Get("Lock-Token")*/)
+}
+
+var IfHdr = regexp.MustCompile(`(?P<resource><.+?>)?\s*\((?P<listitem>[^)]+)\)`)
+
+var ListItem = regexp.MustCompile(
+	`(?P<not>not)?\s*(?P<listitem><[a-zA-Z]+:[^>]*>|\[.*?\])`)
+
+type TagList struct {
+	resource string
+	list     []string
+	NOTTED   int
+}
+
+func IfParser(hdr string) []*TagList {
+	out := make([]*TagList, 0)
+	/*i := 0
+	  for {
+	      m := IfHdr.FindString(hdr[i:])
+	      if m == ""{
+	       break
+	   	}
+
+	      i = i + m.end()
+	      tag := new(TagList)
+	      tag.resource = m.group("resource")
+	      // We need to delete < >
+	      if tag.resource != "" {
+	          tag.resource = tag.resource[1:-1]
+	      }
+	      listitem = m.group("listitem")
+	      tag.NOTTED, tag.list = ListParser(listitem)
+	      append(out, tag)
+	  }*/
+
+	return out
 }
 
 // is path locked?
 func (s *Server) isLocked(path, ifHeader string) bool {
-	// TODO
-	return false
-}
+	token, ok := s.path_to_token[path]
+	if !ok {
+		return false
+	}
 
-func (s *Server) _l_isLocked(uri string) bool {
-	_, ok := s.uris_to_token[uri]
-	return ok
+	if ifHeader == "" {
+		return true
+	}
+
+	taglist := IfParser(ifHeader)
+	found := false
+	for _, tag := range taglist {
+		for _, listitem := range tag.list {
+			token = tokenFinder(listitem)
+			if (token != "") &&
+				s.hasLock(token) &&
+				(s.getLock(token).uri == path) {
+				found = true
+				break
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	return !found
 }
 
 func (s *Server) hasLock(token string) bool {
@@ -194,7 +293,7 @@ func (s *Server) hasLock(token string) bool {
 }
 
 func (s *Server) getToken(uri string) string {
-	return s.uris_to_token[uri]
+	return s.path_to_token[uri]
 }
 
 func (s *Server) getLock(token string) *Lock {
@@ -203,14 +302,14 @@ func (s *Server) getLock(token string) *Lock {
 
 func (s *Server) delLock(token string) {
 	if lock, ok := s.tokens_to_lock[token]; ok {
-		delete(s.uris_to_token, lock.uri)
+		delete(s.path_to_token, lock.uri)
 		delete(s.tokens_to_lock, token)
 	}
 }
 
 func (s *Server) setLock(lock *Lock) {
 	s.tokens_to_lock[lock.token] = lock
-	s.uris_to_token[lock.uri] = lock.token
+	s.path_to_token[lock.uri] = lock.token
 }
 
 func (s *Server) lockResource(path string) {
@@ -888,7 +987,44 @@ func (s *Server) copyCollection(source, dest string, w http.ResponseWriter, r *h
 			}
 		}
 	}
+}
 
+func (s *Server) _lock_unlock_parse(body io.Reader) (map[string]string, error) {
+	node, err := NodeFromXml(body)
+	if err != nil {
+		return nil, err
+	}
+
+	data := make(map[string]string)
+	if node != nil {
+		info := node.FirstChildren("lockinfo")
+		if info != nil {
+			data["lockscope"] = info.FirstChildren("lockscope").Children[0].Name.Local
+
+			data["locktype"] = info.FirstChildren("locktype").Children[0].Name.Local
+
+			data["lockowner"] = info.FirstChildren("owner").Name.Local
+		}
+	}
+	return data, nil
+}
+
+func (s *Server) _lock_unlock_create(uri, creator, depth string, data map[string]string) (string, string) {
+	lock := &Lock{uri: uri, creator: creator}
+	iscollection := (uri[len(uri)-1] == '/') //# very dumb collection check
+
+	result := ""
+	if depth == "infinity" && iscollection {
+		//# locking of children/collections not yet supported
+		//pass
+	}
+
+	if !s.isLocked(uri, "") {
+		s.setLock(lock)
+	}
+
+	//# because we do not handle children we leave result empty
+	return lock.token, result
 }
 
 func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
@@ -902,8 +1038,99 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: lock
-	w.WriteHeader(StatusNotImplemented)
+	//dc = self.IFACE_CLASS
+
+	log.Info("LOCKing resource %s", r.Header)
+
+	var body string
+	if r.Header.Get("Content-Length") != "" {
+		l := r.Header.Get("Content-Length")
+		ll, _ := strconv.Atoi(l)
+		rd := io.LimitReader(r.Body, int64(ll))
+		bt := make([]byte, ll)
+		_, err := rd.Read(bt)
+		if err != nil {
+			fmt.Println(err)
+			w.WriteHeader(500)
+			return
+		}
+		body = string(bt)
+		fmt.Println("body:", body)
+	}
+
+	depth := "infinity"
+	if r.Header.Get("Depth") != "" {
+		depth = r.Header.Get("Depth")
+	}
+
+	//uri = urlparse.urljoin(self.get_baseuri(dc), self.path)
+	//uri = urllib.unquote(uri)
+	uri := r.RequestURI
+	log.Info("do_LOCK: uri = %s", uri)
+
+	ifheader := r.Header.Get("If")
+	alreadylocked := s.isLocked(uri, ifheader)
+	log.Info("do_LOCK: alreadylocked = %s", alreadylocked)
+
+	if body != "" && alreadylocked {
+		//# Full LOCK request but resource already locked
+		//self.responses[423] = ('Locked', 'Already locked')
+		w.WriteHeader(423)
+		return
+	} else if body != "" && ifheader == "" {
+		//# LOCK with XML information
+		data, err := s._lock_unlock_parse(r.Body)
+		if err != nil {
+			fmt.Println(err)
+			w.WriteHeader(500)
+			return
+		}
+		token, result := s._lock_unlock_create(uri, "unknown", depth, data)
+
+		if result != "" {
+			w.Write([]byte(result))
+			w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+			w.WriteHeader(207)
+		} else {
+			lock := s.getLock(token)
+			w.Write([]byte(lock.asXML("DAV:", true)))
+			w.Header().Set("Lock-Token", fmt.Sprintf("<opaquelocktoken:%s>", token))
+			w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+			w.WriteHeader(200)
+		}
+	} else {
+		//d# refresh request - refresh lock timeout
+		taglist := IfParser(ifheader)
+		var found bool
+		for _, tag := range taglist {
+			for _, listitem := range tag.list {
+				token := tokenFinder(listitem)
+				if token != "" && s.hasLock(token) {
+					lock := s.getLock(token)
+					timeout := "Infinite"
+					if r.Header.Get("Timeout") != "" {
+						timeout = r.Header.Get("Timeout")
+					}
+					to, _ := strconv.Atoi(timeout)
+					lock.setTimeout(time.Duration(to)) //# automatically refreshes
+					found = true
+
+					w.WriteHeader(200)
+					w.Write([]byte(lock.asXML("", true)))
+					w.Header().Set("Content-Type", "text/xml; encoding=utf-8")
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		//# we didn't find any of the tokens mentioned - means
+		//# that table was cleared or another error
+		if !found {
+			w.WriteHeader(412) //a# precondition failed
+		}
+	}
 }
 
 // takes a string like '<opaquelocktoken:afsdfadfadf> and returns the token
@@ -922,7 +1149,7 @@ func tokenFinder(token string) string {
 }
 
 func (s *Server) doUnlock(w http.ResponseWriter, r *http.Request) {
-	if s.ReadOnly {
+	/*if s.ReadOnly {
 		w.WriteHeader(StatusForbidden)
 		return
 	}
@@ -934,30 +1161,32 @@ func (s *Server) doUnlock(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: unlock
 	w.WriteHeader(StatusNotImplemented)
-	return
-	/*
-		        dc = self.IFACE_CLASS
+	return*/
 
-		        if self._config.DAV.getboolean('verbose') is True:
-		            log.info('UNLOCKing resource %s' % self.headers)
+	//dc = self.IFACE_CLASS
 
-		        uri = urlparse.urljoin(self.get_baseuri(dc), self.path)
-		        uri = urllib.unquote(uri)
+	//if self._config.DAV.getboolean('verbose') is True:
+	log.Info("UNLOCKing resource", r.Header)
 
-		        # check lock token - must contain a dash
+	//uri := urlparse.urljoin(self.get_baseuri(dc), self.path)
+	//uri = urllib.unquote(uri)
+	uri := r.RequestURI
 
-		        if !strings.Contains(r.Header.Get("Lock-Token"), "-") {
-					w.WriteHeader(400)
-		        	return
-		        }
+	// check lock token - must contain a dash
+	lockToken := r.Header.Get("Lock-Token")
+	if !strings.Contains(lockToken, "-") {
+		w.WriteHeader(400)
+		return
+	}
 
-		        token := tokenFinder(r.Header.Get("Lock-Token"))
-		        if s.isLocked(path, ifHeader)._l_isLocked(uri) {
-		            s._l_delLock(token)
-		        }
+	ifHeader := r.Header.Get("If")
+	token := tokenFinder(lockToken)
+	if s.isLocked(uri, ifHeader) {
+		s.delLock(token)
+	}
 
-		        w.WriteHeader(204)
-		        //self.send_body(None, '204', 'Ok', 'Ok')*/
+	w.WriteHeader(204)
+	//self.send_body(None, '204', 'Ok', 'Ok')
 }
 
 func (s *Server) doOptions(w http.ResponseWriter, r *http.Request) {
