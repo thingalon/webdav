@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"math/rand"
@@ -989,22 +990,26 @@ func (s *Server) copyCollection(source, dest string, w http.ResponseWriter, r *h
 	}
 }
 
-func (s *Server) _lock_unlock_parse(body io.Reader) (map[string]string, error) {
-	node, err := NodeFromXml(body)
+func (s *Server) _lock_unlock_parse(body string) (map[string]string, error) {
+	node, err := NodeFromXmlString(body)
 	if err != nil {
 		return nil, err
 	}
 
 	data := make(map[string]string)
 	if node != nil {
-		info := node.FirstChildren("lockinfo")
-		if info != nil {
-			data["lockscope"] = info.FirstChildren("lockscope").Children[0].Name.Local
-
-			data["locktype"] = info.FirstChildren("locktype").Children[0].Name.Local
-
-			data["lockowner"] = info.FirstChildren("owner").Name.Local
+		if node.Name.Local != "lockinfo" {
+			node = node.FirstChildren("lockinfo")
 		}
+		if node == nil {
+			return nil, errors.New("not lockinfo element")
+		}
+
+		data["lockscope"] = node.FirstChildren("lockscope").Children[0].Name.Local
+
+		data["locktype"] = node.FirstChildren("locktype").Children[0].Name.Local
+
+		data["lockowner"] = node.FirstChildren("owner").Children[0].Value[7:]
 	}
 	return data, nil
 }
@@ -1055,7 +1060,6 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body = string(bt)
-		fmt.Println("body:", body)
 	}
 
 	depth := "infinity"
@@ -1079,12 +1083,14 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if body != "" && ifheader == "" {
 		//# LOCK with XML information
-		data, err := s._lock_unlock_parse(r.Body)
+		//fmt.Println("body:", body)
+		data, err := s._lock_unlock_parse(body)
 		if err != nil {
 			fmt.Println(err)
 			w.WriteHeader(500)
 			return
 		}
+		//fmt.Println("lock:", data)
 		token, result := s._lock_unlock_create(uri, "unknown", depth, data)
 
 		if result != "" {
@@ -1093,10 +1099,12 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(207)
 		} else {
 			lock := s.getLock(token)
-			w.Write([]byte(lock.asXML("DAV:", true)))
 			w.Header().Set("Lock-Token", fmt.Sprintf("<opaquelocktoken:%s>", token))
 			w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-			w.WriteHeader(200)
+			output := lock.asXML("DAV:", true)
+			fmt.Println("output:", output)
+			w.Write([]byte(output))
+			//w.WriteHeader(200)
 		}
 	} else {
 		//d# refresh request - refresh lock timeout

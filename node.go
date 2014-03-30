@@ -3,13 +3,20 @@ package webdav
 import (
 	"encoding/xml"
 	"io"
+	"strings"
 )
 
 type Node struct {
 	Name     xml.Name
 	Attr     []xml.Attr
 	Children []*Node
+	Value    string
 	Parent   *Node
+}
+
+func NodeFromXmlString(xmls string) (*Node, error) {
+	rd := strings.NewReader(xmls)
+	return NodeFromXml(rd)
 }
 
 func NodeFromXml(r io.Reader) (*Node, error) {
@@ -42,6 +49,10 @@ func NodeFromXml(r io.Reader) (*Node, error) {
 
 			if parent != nil {
 				parent.Children = append(parent.Children, cur)
+			}
+		case xml.CharData:
+			if cur != nil {
+				cur.Value = string(tok)
 			}
 		case xml.EndElement:
 			if cur.Parent == nil {
@@ -98,8 +109,12 @@ func (n *Node) FirstChildren(name string) *Node {
 func (n *Node) String() string {
 	r := "<" + n.Name.Local + " xmlns=\"" + n.Name.Space + "\">\n"
 
-	for _, v := range n.Children {
-		r += v.String() + "\n"
+	if len(n.Children) > 0 {
+		for _, v := range n.Children {
+			r += v.String() + "\n"
+		}
+	} else if len(n.Value) > 0 {
+		r += n.Value + "\n"
 	}
 
 	r += "<\\" + n.Name.Local + ">"

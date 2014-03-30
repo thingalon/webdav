@@ -2,6 +2,7 @@ package webdav
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -52,17 +53,17 @@ func (lock *Lock) asXML(namespace string, discover bool) string {
 	//owner_str = lock.owner
 	//owner_str = "".join([node.toxml() for node in self.owner[0].childNodes])
 
-	base := fmt.Sprintf(`<%[1]s:activelock>\n
-             <%[1]s:locktype><%[1]s:%[2]s/></%[1]s:locktype>\n'
-             '  <%[1]s:lockscope><%[1]s:%[3]s/></%[1]s:lockscope>\n'
-             '  <%[1]s:depth>%[4]s</%[1]s:depth>\n'
-             '  <%[1]s:owner>%[5]s</%[1]s:owner>\n'
-             '  <%[1]s:timeout>%[6]s</%[1]s:timeout>\n'
-             '  <%[1]s:locktoken>\n'
-             '   <%[1]s:href>opaquelocktoken:%[7]s</%[1]s:href>\n'
-             '  </%[1]s:locktoken>\n'
-             ' </%[1]s:activelock>\n'
-             `, namespace,
+	base := fmt.Sprintf(`<%[1]s:activelock>
+             <%[1]s:locktype><%[1]s:%[2]s/></%[1]s:locktype>
+             <%[1]s:lockscope><%[1]s:%[3]s/></%[1]s:lockscope>
+             <%[1]s:depth>%[4]d</%[1]s:depth>
+             <%[1]s:owner>%[5]s</%[1]s:owner>
+             <%[1]s:timeout>%[6]s</%[1]s:timeout>
+             <%[1]s:locktoken>
+             <%[1]s:href>opaquelocktoken:%[7]s</%[1]s:href>
+             </%[1]s:locktoken>
+             </%[1]s:activelock>
+             `, strings.Trim(namespace, ":"),
 		lock.typ,
 		lock.scope,
 		lock.depth,
