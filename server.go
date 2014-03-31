@@ -25,7 +25,7 @@ func newLogger(execDir string) {
 	level := "0"
 	logPath := execDir + "/log/webdav.log"
 	os.MkdirAll(path.Dir(logPath), os.ModePerm)
-	log.NewLogger(10000, "file", fmt.Sprintf(`{"level":%s,"filename":"%s"}`, level, logPath))
+	log.NewLogger(0, "file", fmt.Sprintf(`{"level":%s,"filename":"%s"}`, level, logPath))
 	log.Trace("start logging webdav...")
 }
 
