@@ -2,9 +2,9 @@ package webdav
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"math/rand"
 	"mime"
 	"net/http"
@@ -13,7 +13,6 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -74,7 +73,7 @@ type Server struct {
 
 func generateToken() string {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	return fmt.Sprintf("%s-%s-00105A989226:%.03f",
+	return fmt.Sprintf("%d-%d-00105A989226:%d",
 		r.Int31(), r.Int31(), time.Now().UnixNano())
 }
 
@@ -220,41 +219,6 @@ func (s *Server) isLockedRequest(r *http.Request) bool {
 	return s.isLocked(
 		s.url2path(r.URL),
 		r.Header.Get("If") /*+r.Header.Get("Lock-Token")*/)
-}
-
-var IfHdr = regexp.MustCompile(`(?P<resource><.+?>)?\s*\((?P<listitem>[^)]+)\)`)
-
-var ListItem = regexp.MustCompile(
-	`(?P<not>not)?\s*(?P<listitem><[a-zA-Z]+:[^>]*>|\[.*?\])`)
-
-type TagList struct {
-	resource string
-	list     []string
-	NOTTED   int
-}
-
-func IfParser(hdr string) []*TagList {
-	out := make([]*TagList, 0)
-	/*i := 0
-	  for {
-	      m := IfHdr.FindString(hdr[i:])
-	      if m == ""{
-	       break
-	   	}
-
-	      i = i + m.end()
-	      tag := new(TagList)
-	      tag.resource = m.group("resource")
-	      // We need to delete < >
-	      if tag.resource != "" {
-	          tag.resource = tag.resource[1:-1]
-	      }
-	      listitem = m.group("listitem")
-	      tag.NOTTED, tag.list = ListParser(listitem)
-	      append(out, tag)
-	  }*/
-
-	return out
 }
 
 // is path locked?
@@ -990,7 +954,7 @@ func (s *Server) copyCollection(source, dest string, w http.ResponseWriter, r *h
 	}
 }
 
-func (s *Server) _lock_unlock_parse(body string) (map[string]string, error) {
+/*func (s *Server) _lock_unlock_parse(body string) (map[string]string, error) {
 	node, err := NodeFromXmlString(body)
 	if err != nil {
 		return nil, err
@@ -1012,11 +976,11 @@ func (s *Server) _lock_unlock_parse(body string) (map[string]string, error) {
 		data["lockowner"] = node.FirstChildren("owner").Children[0].Value[7:]
 	}
 	return data, nil
-}
+}*/
 
-func (s *Server) _lock_unlock_create(uri, creator, depth string, data map[string]string) (string, string) {
-	lock := &Lock{uri: uri, creator: creator}
-	iscollection := (uri[len(uri)-1] == '/') //# very dumb collection check
+func (s *Server) _lock_unlock_create(lock *Lock, depth string) (string, string) {
+	//lock := &Lock{uri: uri, creator: creator}
+	iscollection := (lock.uri[len(lock.uri)-1] == '/') //# very dumb collection check
 
 	result := ""
 	if depth == "infinity" && iscollection {
@@ -1024,13 +988,34 @@ func (s *Server) _lock_unlock_create(uri, creator, depth string, data map[string
 		//pass
 	}
 
-	if !s.isLocked(uri, "") {
+	if !s.isLocked(lock.uri, "") {
 		s.setLock(lock)
 	}
 
 	//# because we do not handle children we leave result empty
 	return lock.token, result
 }
+
+/*
+  LOCK /workspace/webdav/proposal.doc HTTP/1.1
+  Host: example.com
+  Timeout: Infinite, Second-4100000000
+  Content-Type: application/xml; charset="utf-8"
+  Content-Length: xxxx
+  Authorization: Digest username="ejw",
+    realm="ejw@example.com", nonce="...",
+    uri="/workspace/webdav/proposal.doc",
+    response="...", opaque="..."
+
+  <?xml version="1.0" encoding="utf-8" ?>
+  <D:lockinfo xmlns:D='DAV:'>
+    <D:lockscope><D:exclusive/></D:lockscope>
+    <D:locktype><D:write/></D:locktype>
+    <D:owner>
+      <D:href>http://example.org/~ejw/contact.html</D:href>
+    </D:owner>
+  </D:lockinfo>
+*/
 
 func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 	if s.ReadOnly {
@@ -1047,20 +1032,13 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 
 	log.Info("LOCKing resource %s", r.Header)
 
-	var body string
-	if r.Header.Get("Content-Length") != "" {
-		l := r.Header.Get("Content-Length")
-		ll, _ := strconv.Atoi(l)
-		rd := io.LimitReader(r.Body, int64(ll))
-		bt := make([]byte, ll)
-		_, err := rd.Read(bt)
-		if err != nil {
-			fmt.Println(err)
-			w.WriteHeader(500)
-			return
-		}
-		body = string(bt)
+	bbody, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		fmt.Println(err)
+		w.WriteHeader(500)
+		return
 	}
+	var body = string(bbody)
 
 	depth := "infinity"
 	if r.Header.Get("Depth") != "" {
@@ -1084,24 +1062,28 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 	} else if body != "" && ifheader == "" {
 		//# LOCK with XML information
 		//fmt.Println("body:", body)
-		data, err := s._lock_unlock_parse(body)
+		lock, err := ParseLockString(body)
+		//data, err := s._lock_unlock_parse(body)
 		if err != nil {
 			fmt.Println(err)
 			w.WriteHeader(500)
 			return
 		}
+		lock.timeout = ParseTimeOut(r)
+		lock.uri = r.RequestURI
+		lock.token = generateToken()
 		//fmt.Println("lock:", data)
-		token, result := s._lock_unlock_create(uri, "unknown", depth, data)
+		token, result := s._lock_unlock_create(lock, depth)
 
 		if result != "" {
 			w.Write([]byte(result))
 			w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 			w.WriteHeader(207)
 		} else {
-			lock := s.getLock(token)
+			//lock := s.getLock(token)
 			w.Header().Set("Lock-Token", fmt.Sprintf("<opaquelocktoken:%s>", token))
 			w.Header().Set("Content-Type", "text/xml; charset=utf-8")
-			output := lock.asXML("DAV:", true)
+			output := lock.asXML("D:", false)
 			fmt.Println("output:", output)
 			w.Write([]byte(output))
 			//w.WriteHeader(200)
@@ -1120,7 +1102,7 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 						timeout = r.Header.Get("Timeout")
 					}
 					to, _ := strconv.Atoi(timeout)
-					lock.setTimeout(time.Duration(to)) //# automatically refreshes
+					lock.SetTimeout(time.Duration(to)) //# automatically refreshes
 					found = true
 
 					w.WriteHeader(200)

@@ -1,6 +1,7 @@
 package webdav
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +12,7 @@ type Lock struct {
 	creator  string
 	owner    string
 	depth    int
-	timeout  time.Duration
+	timeout  TimeOut
 	typ      string
 	scope    string
 	token    string
@@ -32,20 +33,49 @@ func NewLock(uri, creator, owner string) *Lock {
 	}
 }
 
+// parse a lock from a http request
+func ParseLockString(body string) (*Lock, error) {
+	node, err := NodeFromXmlString(body)
+	if err != nil {
+		return nil, err
+	}
+
+	if node == nil {
+		return nil, errors.New("no found node")
+	}
+
+	lock := new(Lock)
+
+	if node.Name.Local != "lockinfo" {
+		node = node.FirstChildren("lockinfo")
+	}
+	if node == nil {
+		return nil, errors.New("not lockinfo element")
+	}
+
+	lock.scope = node.FirstChildren("lockscope").Children[0].Name.Local
+
+	lock.typ = node.FirstChildren("locktype").Children[0].Name.Local
+
+	lock.owner = node.FirstChildren("owner").Children[0].Value
+
+	return lock, nil
+}
+
 func (lock *Lock) Refresh() {
 	lock.Modified = time.Now()
 }
 
 func (lock *Lock) IsValid() bool {
-	return lock.timeout > time.Now().Sub(lock.Modified)
+	return time.Duration(lock.timeout) > time.Now().Sub(lock.Modified)
 }
 
-func (lock *Lock) GetTimeoutString() string {
-	return fmt.Sprintf("Second-%d", lock.timeout/time.Second)
+func (lock *Lock) GetTimeout() TimeOut {
+	return lock.timeout
 }
 
-func (lock *Lock) setTimeout(timeout time.Duration) {
-	lock.timeout = timeout
+func (lock *Lock) SetTimeout(timeout time.Duration) {
+	lock.timeout = TimeOut(timeout)
 	lock.Modified = time.Now()
 }
 
@@ -68,7 +98,7 @@ func (lock *Lock) asXML(namespace string, discover bool) string {
 		lock.scope,
 		lock.depth,
 		lock.owner,
-		lock.GetTimeoutString(),
+		lock.GetTimeout(),
 		lock.token,
 	)
 
