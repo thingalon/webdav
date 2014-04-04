@@ -160,7 +160,7 @@ func (s *Server) url2path(u *url.URL) string {
 
 // convert path to url
 func (s *Server) path2url(p string) *url.URL {
-	return &url.URL{Path: "/" + s.TrimPrefix + "/" + p}
+	return &url.URL{Path: path.Join("/", s.TrimPrefix, p)}
 }
 
 // does path exists?
@@ -395,7 +395,7 @@ func (s *Server) doPropfind(w http.ResponseWriter, r *http.Request) {
 		fi, _ := f.Stat()
 
 		buf.WriteString(`<response>`)
-		buf.WriteString(`<href>` + abs + p + `</href>`)
+		buf.WriteString(`<href>` + abs + "/" + p + `</href>`)
 		buf.WriteString(`<propstat>`)
 		{
 			buf.WriteString(`<prop>`)
@@ -546,8 +546,8 @@ func (s *Server) doMkcol(w http.ResponseWriter, r *http.Request) {
 	path := s.url2path(r.URL)
 	if s.pathExists(path) {
 		w.Header().Set("Allow", s.methodsAllowed(s.url2path(r.URL)))
-		//w.WriteHeader(StatusMethodNotAllowed)
-		w.WriteHeader(StatusCreated)
+		w.WriteHeader(StatusMethodNotAllowed)
+		//w.WriteHeader(StatusCreated)
 		return
 	}
 

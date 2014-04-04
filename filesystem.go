@@ -89,7 +89,7 @@ func (d Dir) Mkdir(name string) error {
 		return err
 	}
 
-	return os.Mkdir(p, os.ModeDir)
+	return os.Mkdir(p, os.ModePerm)
 }
 
 func (d Dir) Remove(name string) error {

@@ -81,6 +81,7 @@ const (
 type TimeOut time.Duration
 
 func (to TimeOut) String() string {
+	fmt.Println("===", time.Duration(to), "===")
 	if int64(to) == 0 {
 		return infinite
 	}
@@ -103,7 +104,7 @@ func ParseTimeOut(req *http.Request) TimeOut {
 	if err != nil {
 		return TimeOut(0)
 	}
-	return TimeOut(a)
+	return TimeOut(time.Duration(a) * time.Second)
 }
 
 func IsOverwrite(req *http.Request) bool {

@@ -92,6 +92,9 @@ func (lock *Lock) asXML(namespace string, discover bool) string {
              <%[1]s:locktoken>
              <%[1]s:href>opaquelocktoken:%[7]s</%[1]s:href>
              </%[1]s:locktoken>
+             <%[1]s:lockroot>
+             <%[1]s:href>%[8]s</%[1]s:href>
+             </%[1]s:lockroot>
              </%[1]s:activelock>
              `, strings.Trim(namespace, ":"),
 		lock.typ,
@@ -100,6 +103,7 @@ func (lock *Lock) asXML(namespace string, discover bool) string {
 		lock.owner,
 		lock.GetTimeout(),
 		lock.token,
+		lock.uri,
 	)
 
 	if discover {
@@ -107,9 +111,9 @@ func (lock *Lock) asXML(namespace string, discover bool) string {
 	}
 
 	return fmt.Sprintf(`<?xml version="1.0" encoding="utf-8" ?>
-<d:prop xmlns:d="DAV:">
- <d:lockdiscovery>
+<D:prop xmlns:d="DAV:">
+ <D:lockdiscovery>
   %s
- </d:lockdiscovery>
-</d:prop>`, base)
+ </D:lockdiscovery>
+</D:prop>`, base)
 }
