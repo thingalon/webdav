@@ -87,6 +87,36 @@ func NewServer(dir, prefix string, listDir bool) *Server {
 	}
 }
 
+var (
+	PullMethods = map[string]bool{
+		"OPTIONS":  true,
+		"GET":      true,
+		"HEAD":     true,
+		"PROPFIND": true}
+
+	PushMethods = map[string]bool{
+		"POST":      true,
+		"DELETE":    true,
+		"PUT":       true,
+		"PROPPATCH": true,
+		"MKCOL":     true,
+		"COPY":      true,
+		"MOVE":      true,
+		"LOCK":      true,
+		"UNLOCK":    true,
+	}
+)
+
+func IsPullMethod(method string) bool {
+	_, ok := PullMethods[method]
+	return ok
+}
+
+func IsPushMethod(method string) bool {
+	_, ok := PushMethods[method]
+	return ok
+}
+
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	//log.Println("DAV:", r.RemoteAddr, r.Method, r.URL)
 
@@ -547,7 +577,6 @@ func (s *Server) doMkcol(w http.ResponseWriter, r *http.Request) {
 	if s.pathExists(path) {
 		w.Header().Set("Allow", s.methodsAllowed(s.url2path(r.URL)))
 		w.WriteHeader(StatusMethodNotAllowed)
-		//w.WriteHeader(StatusCreated)
 		return
 	}
 
