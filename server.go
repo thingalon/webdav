@@ -17,15 +17,22 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gogits/gogs/modules/log"
+	qlog "github.com/qiniu/log"
 )
 
+var logger *qlog.Logger
+
 func newLogger(execDir string) {
-	level := "0"
 	logPath := execDir + "/log/webdav.log"
 	os.MkdirAll(path.Dir(logPath), os.ModePerm)
-	log.NewLogger(0, "file", fmt.Sprintf(`{"level":%s,"filename":"%s"}`, level, logPath))
-	log.Trace("start logging webdav...")
+
+	f, err := os.OpenFile(logPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		qlog.Fatal(err)
+	}
+
+	logger = qlog.New(f, "", qlog.Ldate|qlog.Ltime)
+	logger.Info("Start logging webdav...")
 }
 
 func ExecDir() (string, error) {
@@ -152,7 +159,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.doUnlock(w, r)
 
 	default:
-		log.Error("DAV:", "unknown method", r.Method)
+		qlog.Error("DAV:", "unknown method", r.Method)
 		w.WriteHeader(StatusBadRequest)
 	}
 }
@@ -1059,7 +1066,7 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 
 	//dc = self.IFACE_CLASS
 
-	log.Info("LOCKing resource %s", r.Header)
+	qlog.Info("LOCKing resource %s", r.Header)
 
 	bbody, err := ioutil.ReadAll(r.Body)
 	if err != nil {
@@ -1077,11 +1084,11 @@ func (s *Server) doLock(w http.ResponseWriter, r *http.Request) {
 	//uri = urlparse.urljoin(self.get_baseuri(dc), self.path)
 	//uri = urllib.unquote(uri)
 	uri := r.RequestURI
-	log.Info("do_LOCK: uri = %s", uri)
+	qlog.Info("do_LOCK: uri = %s", uri)
 
 	ifheader := r.Header.Get("If")
 	alreadylocked := s.isLocked(uri, ifheader)
-	log.Info("do_LOCK: alreadylocked = %s", alreadylocked)
+	qlog.Info("do_LOCK: alreadylocked = %s", alreadylocked)
 
 	if body != "" && alreadylocked {
 		//# Full LOCK request but resource already locked
@@ -1185,7 +1192,7 @@ func (s *Server) doUnlock(w http.ResponseWriter, r *http.Request) {
 	//dc = self.IFACE_CLASS
 
 	//if self._config.DAV.getboolean('verbose') is True:
-	log.Info("UNLOCKing resource", r.Header)
+	qlog.Info("UNLOCKing resource", r.Header)
 
 	//uri := urlparse.urljoin(self.get_baseuri(dc), self.path)
 	//uri = urllib.unquote(uri)
