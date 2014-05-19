@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/der-antikeks/go-webdav"
+	"github.com/smoogle/webdav"
 )
 
 var (
