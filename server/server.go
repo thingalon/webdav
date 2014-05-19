@@ -2,25 +2,24 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
-	"os"
 
 	"github.com/smoogle/webdav"
 )
 
-var (
-	path = "./tmp"
-)
-
 func main() {
-	os.Mkdir(path, os.ModeDir)
+	dir, err := ioutil.TempDir("", "webdav")	
+	if err != nil {
+		log.Fatalf("could not create temporary directory: %v", err)
+	}
 
 	// http.StripPrefix is not working, webdav.Server has no knowledge
 	// of stripped component, but needs for COPY/MOVE methods.
 	// Destination path is supplied as header and needs to be stripped.
 	http.Handle("/webdav/", &webdav.Server{
-		Fs:         webdav.Dir(path),
+		Fs:         webdav.Dir(dir),
 		TrimPrefix: "/webdav/",
 		Listings:   true,
 	})

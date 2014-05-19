@@ -3,6 +3,7 @@ package webdav
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"io"
 	"io/ioutil"
 	"math/rand"
@@ -125,7 +126,7 @@ func IsPushMethod(method string) bool {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	//log.Println("DAV:", r.RemoteAddr, r.Method, r.URL)
+	log.Println("DAV:", r.RemoteAddr, r.Method, r.URL)
 
 	switch r.Method {
 	case "OPTIONS":
@@ -600,6 +601,7 @@ func (s *Server) doMkcol(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.Fs.Mkdir(path); err != nil {
+		log.Printf("err: %v", err)
 		w.WriteHeader(StatusConflict)
 		return
 	}
